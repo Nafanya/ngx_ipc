@@ -1,14 +1,13 @@
-//worker processes of the world, unite.
-#include <ngx_lua_ipc.h>
 #include <ngx_channel.h>
 #include <assert.h>
+
 #include "ipc.h"
 
 #define DEBUG_LEVEL NGX_LOG_DEBUG
 //#define DEBUG_LEVEL NGX_LOG_WARN
 
-#define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "IPC:" fmt, ##args)
-#define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "IPC:" fmt, ##args)
+#define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "IPC | " fmt, ##args)
+#define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "IPC | " fmt, ##args)
 
 
 static void ipc_read_handler(ngx_event_t *ev);
@@ -156,7 +155,6 @@ static ngx_int_t ipc_write_buffered_alert(ngx_socket_t fd, ipc_alert_link_t *ale
  
   unsent = alert->buf.len - alert->sent;
   data = &alert->buf.data[alert->sent];
-  
   n = write(fd, data, unsent);
   if (n == -1) {
     err = ngx_errno;
@@ -420,13 +418,13 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
   ngx_int_t           rc;
   ngx_socket_t        s = ipc_proc->c->fd;
   
-  DBG("IPC read at most %i bytes", rbuf->read_next_bytes);
+  //DBG("read at most %i bytes", rbuf->read_next_bytes);
   
   while(rbuf->read_next_bytes > 0) {
     assert(rbuf->buf_last - rbuf->last >= (ssize_t )rbuf->read_next_bytes);
     
     n = read(s, rbuf->last, rbuf->read_next_bytes);
-    DBG("...actually read %i", n);
+    //DBG("\t...actually read %i", n);
     if (n == -1) {
       err = ngx_errno;
       if (err == NGX_EAGAIN) {
@@ -452,7 +450,7 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
 }
 
 static void ipc_read_handler(ngx_event_t *ev) {
-  DBG("IPC channel handler");
+  //DBG("\tIPC channel handler");
   //copypasta from os/unix/ngx_process_cycle.c (ngx_channel_handler)
   ngx_int_t          rc;
   ngx_connection_t  *c;
@@ -497,7 +495,7 @@ ngx_int_t ipc_alert(ipc_t *ipc, ngx_int_t slot, ngx_str_t *name, ngx_str_t *data
     data = &empty;
   }
   
-  DBG("IPC send alert '%V' (data:'%V') to slot %i", name, data, slot);
+  DBG("send alert '%V' (data.len:'%ui') to slot %i", name, data->len, slot);
   
   if(slot == ngx_process_slot) {
     ipc->handler(slot, name, data);
