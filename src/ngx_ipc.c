@@ -3,7 +3,7 @@
 #include "ngx_rtmp_stats.h"
 #include "ngx_ipc.h"
 #include "ngx_ipc_core.h"
-#include "shmem.h"
+#include "ngx_ipc_shmem.h"
 
 #include <assert.h>
 

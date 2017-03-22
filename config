@@ -5,7 +5,7 @@ ngx_addon_name=ngx_ipc_module
 _NGX_IPC_SRCS="\
   ${ngx_addon_dir}/src/ngx_ipc_core.c \
   ${ngx_addon_dir}/src/ngx_ipc.c \
-  ${ngx_addon_dir}/src/shmem.c \
+  ${ngx_addon_dir}/src/ngx_ipc_shmem.c \
 "
 
 ngx_module_incs=$ngx_addon_dir/src

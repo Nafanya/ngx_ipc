@@ -1,7 +1,7 @@
 #include <ngx_http.h>
 #include <nginx.h>
 
-#include "shmem.h"
+#include "ngx_ipc_shmem.h"
 #include "assert.h"
 
 #define DEBUG_SHM_ALLOC 0
