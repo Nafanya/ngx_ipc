@@ -4,7 +4,7 @@
 #include <ngx_http.h>
 #include <nginx.h>
 
-extern ngx_module_t ngx_lua_ipc_module;
+extern ngx_module_t ngx_ipc_module;
 
 typedef struct worker_slot_s     worker_slot_t;
 typedef struct shm_data_s        shm_data_t;
@@ -14,7 +14,7 @@ struct worker_slot_s {
     ngx_int_t        slot;
 };
 
-struct shm_data_t {
+struct shm_data_s {
     worker_slot_t   *worker_slots;
     void            *ptr;
 };
