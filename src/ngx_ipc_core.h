@@ -1,3 +1,7 @@
+#ifndef NGX_IPC_CORE_H
+#define NGX_IPC_CORE_H
+
+
 #include <ngx_core.h>
 
 /**
@@ -84,3 +88,5 @@ ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle);
 ngx_int_t ipc_close(ipc_t *ipc, ngx_cycle_t *cycle);
 
 ngx_int_t ipc_alert(ipc_t *ipc, ngx_int_t slot, ngx_str_t *name, ngx_str_t *data);
+
+#endif //NGX_IPC_CORE_H

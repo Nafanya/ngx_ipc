@@ -1,9 +1,9 @@
-#include <ngx_rtmp_stats.h>
+#include <ngx_core.h>
 
+#include "ngx_rtmp_stats.h"
 #include "ngx_ipc.h"
-#include "ipc.h"
+#include "ngx_ipc_core.h"
 #include "shmem.h"
-#include <ngx_rtmp_stats.h>
 
 #include <assert.h>
 

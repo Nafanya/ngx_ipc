@@ -1,7 +1,7 @@
 #include <ngx_channel.h>
 #include <assert.h>
 
-#include "ipc.h"
+#include "ngx_ipc_core.h"
 
 #define DEBUG_LEVEL NGX_LOG_DEBUG
 
