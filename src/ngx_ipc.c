@@ -145,6 +145,9 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
         }
     }
 
+    DBG("ngx_ipc_alert_handler sender_slot=%d, sender_pid=%ui, mypid=%ui",
+        sender_slot, sender_pid, (ngx_uint_t)ngx_getpid());
+
     alert->sender_slot = sender_slot;
     alert->sender_pid = sender_pid;
 
@@ -199,9 +202,9 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
             p += (l->buf->last - l->buf->pos);
         }
 
-        if (sender_pid != (ngx_int_t)ngx_getpid()) {
+//        if (sender_pid != (ngx_int_t)ngx_getpid()) {
             ngx_ipc_send_alert(sender_pid, &name1, &response);
-        }
+//        }
         ngx_destroy_pool(pool);
     } else if (name->data[0] == 'r') {
         DBG("handling response key.data=%V key.len=%ui, value.len=%ui", name, name->len, data->len);
