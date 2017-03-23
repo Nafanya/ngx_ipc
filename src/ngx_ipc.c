@@ -172,7 +172,7 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
     if (name->data[0] == 'c') { //collect:conn_id
         conn_id = ngx_atoi(data->data, data->len);
         if (conn_id == NGX_ERROR) {
-            DBG("bad conn_id"); //TODO: emerg
+            ERR("got 'collect' request from fd=-1");
         }
 
         p = ngx_snprintf(nbuf, sizeof(nbuf), "response%d", conn_id);
@@ -184,8 +184,7 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
         cl = ngx_rtmp_stat_create_stats(pool);
         if (cl == NULL) {
             ngx_destroy_pool(pool);
-            //          DBG("couldn't allocate ")
-            return; // TODO: send reponse
+            return;
         }
         len = 0;
 
@@ -195,20 +194,18 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
         DBG("created response with len=%ui", len);
         ngx_str_t response;
         response.len = len;
-        response.data = ngx_pcalloc(pool, len);
+        if ((response.data = ngx_pcalloc(pool, len)) == NULL) {
+            ngx_destroy_pool(pool);
+        }
         p = response.data;
         for (l = cl; l; l = l->next) {
             ngx_memcpy(p, l->buf->pos, l->buf->last - l->buf->pos);
             p += (l->buf->last - l->buf->pos);
         }
 
-//        if (sender_pid != (ngx_int_t)ngx_getpid()) {
-            ngx_ipc_send_alert(sender_pid, &name1, &response);
-//        }
+        ngx_ipc_send_alert(sender_pid, &name1, &response);
         ngx_destroy_pool(pool);
     } else if (name->data[0] == 'r') {
-        DBG("handling response key.data=%V key.len=%ui, value.len=%ui", name, name->len, data->len);
-
         conn_id = ngx_atoi(name->data + 8, name->len - 8);
 
         ngx_rtmp_stat_handle_stat(conn_id, data);
