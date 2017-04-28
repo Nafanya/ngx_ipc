@@ -73,12 +73,12 @@ struct ipc_s {
 
     ipc_process_t         process[NGX_MAX_PROCESSES];
 
-    void                  (*handler)(ngx_int_t slot, ngx_int_t module, size_t size, u_char *data);
+    void                  (*handler)(ngx_int_t slot, ngx_int_t module, ngx_str_t *data);
 };
 
 ngx_int_t ipc_init(ipc_t *ipc);
 ngx_int_t ipc_open(ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers, void (*slot_callback)(int slot, int worker));
-ngx_int_t ipc_set_handler(ipc_t *ipc, void (*msg_handler)(ngx_int_t, ngx_int_t, size_t, u_char *));
+ngx_int_t ipc_set_handler(ipc_t *ipc, void (*msg_handler)(ngx_int_t, ngx_int_t, ngx_str_t *));
 ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle);
 ngx_int_t ipc_close(ipc_t *ipc, ngx_cycle_t *cycle);
 

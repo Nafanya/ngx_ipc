@@ -21,11 +21,14 @@ static ipc_t           *ipc = NULL;
 static ngx_int_t        max_workers;
 static ngx_log_t       *cycle_log;
 
-//received but yet-unprocessed alerts are quered here
-static struct {
+typedef struct ipc_msg_queue_s ipc_msg_queue_t;
+
+struct ipc_msg_queue_s {
     ipc_msg_waiting_t  *head;
     ipc_msg_waiting_t  *tail;
-} received_alerts = {NULL, NULL};
+};
+
+static ipc_msg_queue_t *received_messages;
 
 static void ngx_ipc_msg_handler(ngx_int_t sender, ngx_int_t module, ngx_str_t *data);
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf);
@@ -89,7 +92,7 @@ static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
     return NGX_OK;
 }
 
-int ngx_ipc_send_alert(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
+int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
     int i;
 
     for (i = 0; i < max_workers; i++) {
@@ -101,7 +104,7 @@ int ngx_ipc_send_alert(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *dat
     return 0;
 }
 
-int ngx_ipc_broadcast_alert(ngx_int_t module, ngx_str_t *data) {
+int ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
     int            i;
 
     for (i = 0; i < max_workers; i++) {
@@ -112,6 +115,10 @@ int ngx_ipc_broadcast_alert(ngx_int_t module, ngx_str_t *data) {
 }
 
 static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
+    ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                  "ipc: message from slot=%d module=%d data=%V", sender_slot, module, data);
+
+/*
     ipc_msg_waiting_t       *alert;
     int                        i;
     ngx_pid_t                  sender_pid = NGX_INVALID_PID;
@@ -190,13 +197,13 @@ static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str
             p += (l->buf->last - l->buf->pos);
         }
 
-        ngx_ipc_send_alert(sender_pid, &name1, &response);
+        ngx_ipc_send_msg(sender_pid, &name1, &response);
         ngx_destroy_pool(pool);
     } else if (name->data[0] == 'r') {
         conn_id = ngx_atoi(name->data + 8, name->len - 8);
 
         ngx_rtmp_stat_handle_stat(conn_id, data);
-    }
+    }*/
 }
 
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf) {
@@ -209,6 +216,7 @@ static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf) {
 
 static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
     ngx_core_conf_t      *ccf = (ngx_core_conf_t *) ngx_get_conf(cycle->conf_ctx, ngx_core_module);
+    ngx_uint_t i;
 
     max_workers = ccf->worker_processes;
     cycle_log = cycle->log;
@@ -219,6 +227,13 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
         ipc_set_handler(ipc, ngx_ipc_msg_handler);
     }
     ipc_open(ipc, cycle, ccf->worker_processes, NULL);
+
+    received_messages = ngx_pcalloc(ngx_cycle->pool, sizeof(ipc_msg_queue_t) * ngx_cycle->modules_n);
+    for (i = 0; i < ngx_cycle->modules_n; i++) {
+        received_messages[i].head = NULL;
+        received_messages[i].tail = NULL;
+    }
+
     return NGX_OK;
 }
 

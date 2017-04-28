@@ -48,7 +48,7 @@ static ngx_int_t reset_readbuf(ipc_readbuf_t *b) {
     return NGX_OK;
 }
 
-ngx_int_t ipc_set_handler(ipc_t *ipc, void (*msg_handler)(ngx_int_t, ngx_int_t, size_t, u_char *)) {
+ngx_int_t ipc_set_handler(ipc_t *ipc, void (*msg_handler)(ngx_int_t, ngx_int_t, ngx_str_t *)) {
     ipc->handler = msg_handler;
     return NGX_OK;
 }
@@ -317,7 +317,10 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
         } else {
             rbuf->bp += n;
             if (rbuf->bp == rbuf->header.size) {
-                ipc_proc->ipc->handler(rbuf->header.slot, rbuf->header.module, rbuf->header.size, rbuf->buf);
+                ngx_str_t t;
+                t.data = rbuf->buf;
+                t.len = rbuf->header.size;
+                ipc_proc->ipc->handler(rbuf->header.slot, rbuf->header.module, &t);
                 reset_readbuf(rbuf);
                 return NGX_OK;
             }
@@ -370,7 +373,7 @@ ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_s
     }
 
     if (slot == ngx_process_slot) {
-        ipc->handler(slot, module_index, data->len, data->data);
+        ipc->handler(slot, module_index, data);
         return NGX_OK;
     }
 
