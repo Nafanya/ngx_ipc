@@ -1,16 +1,16 @@
+#include <ngx_config.h>
 #include <ngx_core.h>
+#include <ngx_http.h>
 
-#include "ngx_rtmp_stats.h"
 #include "ngx_ipc.h"
 #include "ngx_ipc_core.h"
 #include "ngx_ipc_shmem.h"
 
-#include <assert.h>
 
 #define DEBUG_LEVEL NGX_LOG_DEBUG
 
-#define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "JUJU | " fmt, ##args)
-#define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "IPC | " fmt, ##args)
+#define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "ipc: " fmt, ##args)
+#define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "ipc: " fmt, ##args)
 
 static shmem_t         *shm = NULL;
 static shm_data_t      *shdata = NULL;
@@ -23,11 +23,11 @@ static ngx_log_t       *cycle_log;
 
 //received but yet-unprocessed alerts are quered here
 static struct {
-    ipc_alert_waiting_t  *head;
-    ipc_alert_waiting_t  *tail;
+    ipc_msg_waiting_t  *head;
+    ipc_msg_waiting_t  *tail;
 } received_alerts = {NULL, NULL};
 
-static void ngx_ipc_alert_handler(ngx_int_t sender, ngx_str_t *name, ngx_str_t *data);
+static void ngx_ipc_msg_handler(ngx_int_t sender, ngx_int_t module, ngx_str_t *data);
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf);
 static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle);
 static ngx_int_t ngx_ipc_init_worker(ngx_cycle_t *cycle);
@@ -66,7 +66,7 @@ ngx_module_t  ngx_ipc_module = {
 
 static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
     shm_data_t         *d;
-    if (data) { //zone being passed after restart
+    if (data) {
         zone->data = data;
         d = zone->data;
         shm_reinit(shm);
@@ -89,42 +89,30 @@ static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
     return NGX_OK;
 }
 
-int ngx_ipc_send_alert(ngx_int_t target_worker, ngx_str_t *name, ngx_str_t *data) {
-    int            i;
+int ngx_ipc_send_alert(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
+    int i;
 
     for (i = 0; i < max_workers; i++) {
         if (shdata->worker_slots[i].pid == target_worker) {
-            ipc_alert(ipc, shdata->worker_slots[i].slot, name, data);
+            ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
             break;
         }
     }
     return 0;
 }
 
-int ngx_ipc_broadcast_alert(ngx_str_t *name, ngx_str_t *data) {
+int ngx_ipc_broadcast_alert(ngx_int_t module, ngx_str_t *data) {
     int            i;
 
     for (i = 0; i < max_workers; i++) {
-        ipc_alert(ipc, shdata->worker_slots[i].slot, name, data);
+        ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
     }
 
     return 0;
 }
 
-int ngx_ipc_broadcast_except_one_alert(ngx_int_t excluded_pid, ngx_str_t *name, ngx_str_t *data) {
-    int            i;
-
-    for (i = 0; i < max_workers; i++) {
-        if (shdata->worker_slots[i].pid != excluded_pid) {
-            ipc_alert(ipc, shdata->worker_slots[i].slot, name, data);
-            break;
-        }
-    }
-    return 0;
-}
-
-static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_str_t *data) {
-    ipc_alert_waiting_t       *alert;
+static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
+    ipc_msg_waiting_t       *alert;
     int                        i;
     ngx_pid_t                  sender_pid = NGX_INVALID_PID;
     static u_char              nbuf[sizeof("response") - 1 + NGX_INT_T_LEN];
@@ -135,7 +123,6 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
     u_char                    *p;
 
     alert = ngx_alloc(sizeof(*alert) + name->len + data->len, ngx_cycle->log);
-    assert(alert);
 
     //find sender process id
     for (i = 0; i < max_workers; i++) {
@@ -145,7 +132,7 @@ static void ngx_ipc_alert_handler(ngx_int_t sender_slot, ngx_str_t *name, ngx_st
         }
     }
 
-    DBG("ngx_ipc_alert_handler sender_slot=%d, sender_pid=%ui, mypid=%ui",
+    DBG("ngx_ipc_msg_handler sender_slot=%d, sender_pid=%ui, mypid=%ui",
         sender_slot, sender_pid, (ngx_uint_t)ngx_getpid());
 
     alert->sender_slot = sender_slot;
@@ -229,7 +216,7 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
     if (ipc == NULL) {
         ipc = &ipc_data;
         ipc_init(ipc);
-        ipc_set_handler(ipc, ngx_ipc_alert_handler);
+        ipc_set_handler(ipc, ngx_ipc_msg_handler);
     }
     ipc_open(ipc, cycle, ccf->worker_processes, NULL);
     return NGX_OK;

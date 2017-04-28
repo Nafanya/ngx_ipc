@@ -1,8 +1,7 @@
 #ifndef NGX_IPC_H
 #define NGX_IPC_H
 
-#include <ngx_http.h>
-#include <nginx.h>
+#include <ngx_core.h>
 
 extern ngx_module_t ngx_ipc_module;
 
