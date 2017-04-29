@@ -6,10 +6,10 @@
 
 /**
   * Each IPC message is packed as following:
-  * <SRC_SLOT(int32)> <DATA_LEN(uint32)> <TARGET_MODULE(int32)> <DATA>
+  * <SRC_SLOT(int32)> <TARGET_MODULE(int32)> <DATA_LEN(uint32)> <DATA>
   */
 
-#define IPC_HEADER_LEN    (sizeof(ngx_int_t) + sizeof(size_t) + sizeof(ngx_int_t))
+#define IPC_HEADER_LEN    (sizeof(ngx_int_t) + sizeof(ngx_int_t) + sizeof(size_t))
 #define IPC_MAX_READ_BYTES 4096
 #define IPC_DEFAULT_RBUF_LEN 512
 
@@ -29,7 +29,7 @@ struct ipc_msg_link_s {
 struct ipc_writebuf_s {
     ipc_msg_link_t       *head;
     ipc_msg_link_t       *tail;
-    size_t                  n;
+    size_t                   n;
 };
 
 struct ipc_readbuf_s {
@@ -46,8 +46,6 @@ struct ipc_readbuf_s {
 
     u_char         *buf;
     ngx_uint_t      bp;
-
-    unsigned    complete:1; //TODO: maybe remove
 };
 
 struct ipc_msg_waiting_s {

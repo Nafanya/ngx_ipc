@@ -18,4 +18,6 @@ struct shm_data_s {
     void            *ptr;
 };
 
+int ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data);
+
 #endif //NGX_IPC_H

@@ -96,7 +96,7 @@ int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data)
     int i;
 
     for (i = 0; i < max_workers; i++) {
-        if (shdata->worker_slots[i].pid == target_worker) {
+        if (shdata->worker_slots[i].slot == target_worker) {
             ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
             break;
         }
@@ -105,18 +105,42 @@ int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data)
 }
 
 int ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
-    int            i;
+    int i;
 
     for (i = 0; i < max_workers; i++) {
         ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
+//        ngx_msleep(50);
     }
 
     return 0;
 }
 
 static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
+    int i;
+
     ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-                  "ipc: message from slot=%d module=%d data=%V", sender_slot, module, data);
+                  "ipc: message %d<-%d module=%d len=%ui",
+                  ngx_process_slot, sender_slot, module, data->len);
+
+    if (data->len > 0 && data->data[0] == 'h') {
+        ngx_str_t r;
+        r.data = ngx_alloc(65976, ngx_cycle->log);
+        if (r.data == NULL) {
+            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                          "ipc: send PONG failed dure to nomem");
+        }
+        r.len = 65976;
+        for (i = 0; i < 65976; i++) {
+            r.data[i] = 'a';
+        }
+
+//        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+//                      "ipc: send PONG from slot=%d module=%d data.len=%d", sender_slot, module, r.len);
+//        ngx_ipc_broadcast_msg(ngx_ipc_module.index, &r);
+        ngx_ipc_send_msg(sender_slot, 1, &r);
+
+        ngx_free(r.data);
+    }
 
 /*
     ipc_msg_waiting_t       *alert;

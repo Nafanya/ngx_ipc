@@ -1,5 +1,4 @@
 #include <ngx_channel.h>
-#include <assert.h>
 
 #include "ngx_ipc_core.h"
 
@@ -34,10 +33,13 @@ ngx_int_t ipc_init(ipc_t *ipc) {
 }
 
 static ngx_int_t reset_readbuf(ipc_readbuf_t *b) {
-    ngx_memzero(&b->header, sizeof(b->header));
+//    ngx_memzero(&b->header, sizeof(b->header));
     b->header.bp = 0;
+    b->header.complete = 0;
+    b->header.module = 0;
+    b->header.size = 0;
+    b->header.slot = 0;
 
-    b->complete = 0;
     b->bp = 0;
 
     if (b->buf) {
@@ -139,14 +141,10 @@ ngx_int_t ipc_close(ipc_t *ipc, ngx_cycle_t *cycle) {
             proc->c = NULL;
         }
 
-        for (cur = proc->wbuf.head; cur != NULL; cur = cur_next) {
+        for (cur = proc->wbuf.head; proc->wbuf.n > 0; proc->wbuf.n--) {
             cur_next = cur->next;
             ipc_free_buffered_msg(cur);
-        }
-
-        if (proc->rbuf.buf) {
-            free(proc->rbuf.buf);
-            ngx_memzero(&proc->rbuf, sizeof(proc->rbuf));
+            cur = cur_next;
         }
 
         ipc_try_close_fd(&proc->pipe[0]);
@@ -166,9 +164,6 @@ ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle) {
         proc = &ipc->process[i];
 
         if (!proc->active) continue;
-
-        assert(proc->pipe[0] != NGX_INVALID_FILE);
-        assert(proc->pipe[1] != NGX_INVALID_FILE);
 
         if (i == ngx_process_slot) {
             c = ngx_get_connection(proc->pipe[0], cycle->log);
@@ -198,29 +193,42 @@ ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle) {
 static ngx_int_t ipc_write_buffered_msg(ngx_socket_t fd, ipc_msg_link_t *msg) {
     ssize_t      n;
     ngx_int_t    err;
-    uint16_t     unsent;
+    ssize_t      unsent;
     u_char      *data;
 
-    unsent = msg->buf.len - msg->sent;
-    data = msg->buf.data + msg->sent;
-    n = write(fd, data, unsent);
-    if (n == -1) {
-        err = ngx_errno;
-        if (err == NGX_EAGAIN) {
-            return NGX_AGAIN;
+    while (1) {
+        unsent = msg->buf.len - msg->sent;
+        data = msg->buf.data + msg->sent;
+
+        if (unsent == 0) {
+            break;
         }
 
-        ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, err, "write() failed");
-        return NGX_ERROR;
-    } else if (n < unsent) {
-        msg->sent += n;
-        return NGX_AGAIN;
+        n = write(fd, data, unsent);
+
+//        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+//                      "\t\tipc: WRITE unsent=%ui sent=%d", unsent, (int)n);
+
+        if (n == -1) {
+            err = ngx_errno;
+            if (err == NGX_EAGAIN) {
+                return NGX_AGAIN;
+            }
+
+            ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, err, "write() failed");
+            return NGX_ERROR;
+        } else if (n < unsent) {
+            msg->sent += n;
+        } else {
+            break;
+        }
     }
 
     return NGX_OK;
 }
 
 static ngx_int_t ipc_free_buffered_msg(ipc_msg_link_t *msg_link) {
+    ngx_free(msg_link->buf.data);
     ngx_free(msg_link);
     return NGX_OK;
 }
@@ -235,36 +243,45 @@ static void ipc_write_handler(ngx_event_t *ev) {
     ngx_int_t         rc;
     uint8_t           aborted = 0;
 
-    while ((cur = proc->wbuf.head) != NULL) {
+    while (proc->wbuf.n > 0) {
+        cur = proc->wbuf.head;
         rc = ipc_write_buffered_msg(fd, cur);
-
         if (rc == NGX_AGAIN) {
+//            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "\tWRITE wbuf NGX_AGAIN");
             aborted = 1;
             break;
         } else if (rc == NGX_OK) {
-            proc->wbuf.head = cur->next;
-            if (proc->wbuf.tail == cur) {
-                proc->wbuf.tail = NULL;
+//            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "\tWRITE wbuf OK");
+
+            proc->wbuf.n--;
+            if (proc->wbuf.n == 0) {
+                proc->wbuf.head = proc->wbuf.tail = NULL;
+            } else {
+                proc->wbuf.head = cur->next;
             }
             ipc_free_buffered_msg(cur);
         } else {
+            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "\tWRITE aborted ret=%d", rc);
             aborted = 1;
             break;
         }
     }
 
     if (aborted) {
+        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "\tWRITE aborted, handle_write_event {");
         ngx_handle_write_event(c->write, 0);
+        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "\tWRITE aborted, handle_write_event }");
     }
 }
 
 static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_t *log) {
-    ngx_int_t       n;
+    ngx_int_t       n, i;
     ngx_err_t       err;
     ngx_socket_t    s = ipc_proc->c->fd;
-    u_char         *p;
+    u_char         *c;
 
     while (!rbuf->header.complete) {
+//        ngx_log_error(NGX_LOG_INFO, log, 0, "\t\tipc: header is not complete: h.bp=%d", rbuf->header.bp);
         n = read(s, rbuf->header.buf + rbuf->header.bp, IPC_HEADER_LEN - rbuf->header.bp);
         if (n == -1) {
             err = ngx_errno;
@@ -279,15 +296,30 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
         } else {
             rbuf->header.bp += n;
             if (rbuf->header.bp == IPC_HEADER_LEN) {
-                p = rbuf->header.buf;
-                rbuf->header.slot   = (*p << 24) + (*(p+1) << 16) + (*(p+2) << 8) + *(p+3);
-                p += 4;
-                rbuf->header.module = (*p << 24) + (*(p+1) << 16) + (*(p+2) << 8) + *(p+3);
-                p += 4;
-                rbuf->header.size   = (*p << 24) + (*(p+1) << 16) + (*(p+2) << 8) + *(p+3);
-                p += 4;
+                c = rbuf->header.buf;
+
+                //TODO: rewrite using macros or function
+                for (i = 0, rbuf->header.slot = 0; i < (int)sizeof(rbuf->header.slot); i++) {
+                    int shift = 8 * (sizeof(rbuf->header.slot) - i - 1);
+                    rbuf->header.slot += (*c << shift);
+                    c++;
+                }
+                for (i = 0, rbuf->header.module = 0; i < (int)sizeof(rbuf->header.module); i++) {
+                    int shift = 8 * (sizeof(rbuf->header.module) - i - 1);
+                    rbuf->header.module += (*c << shift);
+                    c++;
+                }
+                for (i = 0, rbuf->header.size = 0; i < (int)sizeof(rbuf->header.size); i++) {
+                    int shift = 8 * (sizeof(rbuf->header.size) - i - 1);
+                    rbuf->header.size += (*c << shift);
+                    c++;
+                }
                 rbuf->header.complete = 1;
-                rbuf->bp = 0;
+
+//                ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+//                              "\t\tipc: ipc_read header parsed slot=%d, module=%d size=%ui",
+//                              rbuf->header.slot, rbuf->header.module, rbuf->header.size);
+
                 break;
             }
         }
@@ -303,10 +335,13 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
     }
 
     while (rbuf->bp < rbuf->header.size) {
-        n = read(s, rbuf->buf + rbuf->bp, rbuf->header.size - rbuf->bp);
+//        ngx_log_error(NGX_LOG_INFO, log, 0, "\t\tipc: READ bp=%ui rem=%ui NGX_AGAIN",
+//                      rbuf->bp, rbuf->header.size - rbuf->bp);
+        n = read(s, &rbuf->buf[rbuf->bp], rbuf->header.size - rbuf->bp);
         if (n == -1) {
             err = ngx_errno;
             if (err == NGX_EAGAIN) {
+//                ngx_log_error(NGX_LOG_INFO, log, 0, "\t\tipc: READ body NGX_AGAIN");
                 return NGX_AGAIN;
             }
             ngx_log_error(NGX_LOG_ERR, log, err, "ipc: read() failed");
@@ -315,17 +350,37 @@ static ngx_int_t ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_
             ngx_log_error(NGX_LOG_ERR, log, 0, "ipc: read() returned 0");
             return NGX_ERROR;
         } else {
+//            ngx_log_error(NGX_LOG_INFO, log, 0, "\t\tipc: READ read=%d bp=%ui bpnew=%ui", n, rbuf->bp, rbuf->bp + n);
             rbuf->bp += n;
-            if (rbuf->bp == rbuf->header.size) {
+            if (rbuf->bp >= rbuf->header.size) {
+//                for (n = 0; n < (int)rbuf->bp; n++) {
+//                    if (rbuf->buf[n] != 'a') {
+//                        ngx_log_error(NGX_LOG_INFO, log, 0, "ipc: rbuf[%7d] == %d '%c'", n, rbuf->buf[n], rbuf->buf[n]);
+//                    }
+//                }
                 ngx_str_t t;
                 t.data = rbuf->buf;
                 t.len = rbuf->header.size;
+
+//                t.data = ngx_alloc(rbuf->header.size, log);
+//                t.len = rbuf->header.size;
+//                if (t.data == NULL) {
+//                    ngx_log_error(NGX_LOG_INFO, log, 0, "\t\tipc: rbuf handler nomem");
+//                    reset_readbuf(rbuf);
+//                    return NGX_OK;
+//                }
+//                ngx_memcpy(t.data, rbuf->buf, rbuf->header.size);
+
+//                reset_readbuf(rbuf);
+
                 ipc_proc->ipc->handler(rbuf->header.slot, rbuf->header.module, &t);
                 reset_readbuf(rbuf);
                 return NGX_OK;
             }
         }
     }
+    ngx_log_error(NGX_LOG_CRIT, ngx_cycle->log, 0,
+                  "ipc: ipc_read() reached end of function");
     // unreachable
     return NGX_OK;
 }
@@ -344,24 +399,28 @@ static void ipc_read_handler(ngx_event_t *ev) {
     ipc_proc = &((ipc_t *)c->data)->process[ngx_process_slot];
 
     while (1) {
+//        ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ rbuf");
         rc = ipc_read(ipc_proc, &ipc_proc->rbuf, ev->log);
-        switch (rc) {
-        case NGX_ERROR:
-            ngx_log_error(NGX_LOG_ERR, ev->log, 0, "ipc: ipc_read parsing buf failed");
+        if (rc == NGX_ERROR) {
+            ngx_log_error(NGX_LOG_ERR, ev->log, 0, "\tipc: READ NGX_ERROR");
             break;
-        case NGX_OK:
+        } else if (rc == NGX_OK) {
+//            ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ NGX_OK");
             continue;
+        } else if (rc == NGX_AGAIN) {
+//            ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ NGX_AGAIN");
             break;
-        case NGX_AGAIN:
-            return;
-        default:
-            return;
+        } else {
+//            ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ WTF");
+            break;
         }
     }
+//    ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ done");
 }
 
 ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data) {
-  
+    ngx_int_t           i;
+    u_char             *c;
     ipc_msg_link_t     *msg;
     ipc_process_t      *proc = &ipc->process[slot];
     ipc_writebuf_t     *wb = &proc->wbuf;
@@ -373,6 +432,9 @@ ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_s
     }
 
     if (slot == ngx_process_slot) {
+        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                      "ipc: message %d->%d md=%d len=%ui",
+                     ngx_process_slot, slot, module_index, data->len);
         ipc->handler(slot, module_index, data);
         return NGX_OK;
     }
@@ -381,40 +443,72 @@ ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_s
         return NGX_ERROR;
     }
 
-    msg_size += IPC_HEADER_LEN + data->len;
-    if ((msg = ngx_alloc(sizeof(*msg) + msg_size, ngx_cycle->log)) == NULL) {
+    if ((msg = ngx_alloc(sizeof(ipc_msg_link_t), ngx_cycle->log)) == NULL) {
         return NGX_ERROR;
     }
     msg->next = NULL;
     msg->sent = 0;
-    msg->buf.data = (u_char *)&msg[1];
 
-    msg->buf.data[0] = (slot >> 24) & 0xFF;
-    msg->buf.data[1] = (slot >> 16) & 0xFF;
-    msg->buf.data[2] = (slot >> 8)  & 0xFF;
-    msg->buf.data[3] = (slot)       & 0xFF;
+    msg_size = IPC_HEADER_LEN + data->len;
+    if ((msg->buf.data = ngx_alloc(msg_size, ngx_cycle->log)) == NULL) {
+        ngx_free(msg);
+        return NGX_ERROR;
+    }
 
-    msg->buf.data[4] = (module_index >> 24) & 0xFF;
-    msg->buf.data[5] = (module_index >> 16) & 0xFF;
-    msg->buf.data[6] = (module_index >> 8)  & 0xFF;
-    msg->buf.data[7] = (module_index)       & 0xFF;
+    //TODO: rewrite using macros or function
 
-    msg->buf.data[8]  = (data->len >> 24) & 0xFF;
-    msg->buf.data[9]  = (data->len >> 16) & 0xFF;
-    msg->buf.data[10] = (data->len >> 8)  & 0xFF;
-    msg->buf.data[11] = (data->len)       & 0xFF;
+    c = msg->buf.data;
+    for (i = 0; i < (int)sizeof(slot); i++) {
+        int shift = 8 * (sizeof(slot) - i - 1);
+        *c = (slot >> shift) & 0xFF;
+        c++;
+    }
+    for (i = 0; i < (int)sizeof(module_index); i++) {
+        int shift = 8 * (sizeof(module_index) - i - 1);
+        *c = (module_index >> shift) & 0xFF;
+        c++;
+    }
+    for (i = 0; i < (int)sizeof(data->len); i++) {
+        int shift = 8 * (sizeof(data->len) - i - 1);
+        *c = (data->len >> shift) & 0xFF;
+        c++;
+    }
 
-    ngx_memcpy(msg->buf.data + 12, data->data, data->len);
+//    ngx_memcpy(msg->buf.data + IPC_HEADER_LEN, data->data, data->len);
+    for (i = 0; i < (int)data->len; i++) {
+        msg->buf.data[i + IPC_HEADER_LEN] = data->data[i];
+    }
 
-    if (wb->tail != NULL) {
+    msg->buf.len = msg_size;
+
+//    for (i = 0; i < (int)IPC_HEADER_LEN + (int)data->len; i++) {
+//        if (msg->buf.data[i] != 'a') {
+//            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "write_msg buf.data[%5d] == '%c' (%d)",
+//                          i, msg->buf.data[i], (int)msg->buf.data[i]);
+//        }
+//    }
+
+    if (wb->n == 0) {
+        wb->head = wb->tail = msg;
+    } else {
         wb->tail->next = msg;
+        wb->tail = msg;
+        msg->next = NULL;
     }
-    wb->tail = msg;
-    if (wb->head == NULL) {
-        wb->head = msg;
-    }
+    wb->n++;
+
+    ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
+                  "ipc: message %d->%d md=%d len=%ui qsz=%d",
+                  ngx_process_slot, slot, module_index, data->len, wb->n);
+//    if (wb->tail != NULL) {
+//        wb->tail->next = msg;
+//    }
+//    wb->tail = msg;
+//    if (wb->head == NULL) {
+//        wb->head = msg;
+//    }
+
     ipc_write_handler(proc->c->write);
 
     return NGX_OK;
 }
-
