@@ -11,21 +11,13 @@
 #define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "ipc: " fmt, ##args)
 #define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "ipc: " fmt, ##args)
 
-static shmem_t         *shm = NULL;
-static shm_data_t      *shdata = NULL;
-static ipc_t            ipc_data;
-static ipc_t           *ipc = NULL;
-static ngx_int_t        max_workers;
-static ngx_log_t       *cycle_log;
-
-typedef struct ipc_msg_queue_s ipc_msg_queue_t;
-
-struct ipc_msg_queue_s {
-    ipc_msg_waiting_t  *head;
-    ipc_msg_waiting_t  *tail;
-};
-
-static ipc_msg_queue_t *received_messages;
+static ngx_ipc_shmem_t     *shm = NULL;
+static ngx_ipc_shm_data_t  *shdata = NULL;
+static ngx_ipc_t            ipc_data;
+static ngx_ipc_t           *ipc = NULL;
+static ngx_int_t            max_workers;
+static ngx_log_t           *cycle_log;
+static ngx_ipc_msg_queue_t *received_messages;
 
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf);
 static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle);
@@ -34,23 +26,22 @@ static void      ngx_ipc_exit_worker(ngx_cycle_t *cycle);
 static void      ngx_ipc_exit_master(ngx_cycle_t *cycle);
 
 static void      ngx_ipc_msg_handler(ngx_int_t sender, ngx_int_t module, ngx_str_t *data);
-static ngx_int_t ngx_ipc_reset_readbuf(ipc_readbuf_t *b);
+static ngx_int_t ngx_ipc_reset_readbuf(ngx_ipc_readbuf_t *b);
 static void      ngx_ipc_try_close_fd(ngx_socket_t *fd);
 
-static ngx_int_t ngx_ipc_init(ipc_t *ipc);
-static ngx_int_t ngx_ipc_open(ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers,
+static ngx_int_t ngx_ipc_init(ngx_ipc_t *ipc);
+static ngx_int_t ngx_ipc_open(ngx_ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers,
                               void (*slot_callback)(int slot, int worker));
-static ngx_int_t ngx_ipc_close(ipc_t *ipc, ngx_cycle_t *cycle);
+static ngx_int_t ngx_ipc_close(ngx_ipc_t *ipc, ngx_cycle_t *cycle);
 
-static ngx_int_t ngx_ipc_write_buffered_msg(ngx_socket_t fd, ipc_msg_link_t *msg);
-static ngx_int_t ngx_ipc_free_buffered_msg(ipc_msg_link_t *msg_link);
+static ngx_int_t ngx_ipc_write_buffered_msg(ngx_socket_t fd, ngx_ipc_msg_link_t *msg);
+static ngx_int_t ngx_ipc_free_buffered_msg(ngx_ipc_msg_link_t *msg_link);
 static void      ngx_ipc_write_handler(ngx_event_t *ev);
-static ngx_int_t ngx_ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_t *log);
+static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rbuf, ngx_log_t *log);
 static void      ngx_ipc_read_handler(ngx_event_t *ev);
 
-//TODO: int -> ngx_int_t
-static ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data);
-static    ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data);
+static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data);
+static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
 static ngx_command_t  ngx_ipc_commands[] = {
@@ -84,9 +75,9 @@ ngx_module_t  ngx_ipc_module = {
 };
 
 
-static ngx_int_t ngx_ipc_init(ipc_t *ipc) {
+static ngx_int_t ngx_ipc_init(ngx_ipc_t *ipc) {
     int             i;
-    ipc_process_t  *proc;
+    ngx_ipc_process_t  *proc;
 
     for (i = 0; i < NGX_MAX_PROCESSES; i++) {
         proc = &ipc->process[i];
@@ -103,7 +94,7 @@ static ngx_int_t ngx_ipc_init(ipc_t *ipc) {
     return NGX_OK;
 }
 
-static ngx_int_t ngx_ipc_reset_readbuf(ipc_readbuf_t *b) {
+static ngx_int_t ngx_ipc_reset_readbuf(ngx_ipc_readbuf_t *b) {
 //    ngx_memzero(&b->header, sizeof(b->header));
     b->header.bp = 0;
     b->header.complete = 0;
@@ -128,12 +119,12 @@ static void ngx_ipc_try_close_fd(ngx_socket_t *fd) {
     }
 }
 
-static ngx_int_t ngx_ipc_open(ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers,
+static ngx_int_t ngx_ipc_open(ngx_ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers,
                    void (*slot_callback)(int slot, int worker)) {
     //initialize pipes for workers in advance.
     int              i, j, s = 0;
     ngx_int_t        last_expected_process = ngx_last_process;
-    ipc_process_t   *proc;
+    ngx_ipc_process_t   *proc;
     ngx_socket_t    *socks;
 
     /* here's the deal: we have no control over fork()ing, nginx's internal
@@ -193,10 +184,10 @@ static ngx_int_t ngx_ipc_open(ipc_t *ipc, ngx_cycle_t *cycle, ngx_int_t workers,
     return NGX_OK;
 }
 
-static ngx_int_t ngx_ipc_close(ipc_t *ipc, ngx_cycle_t *cycle) {
+static ngx_int_t ngx_ipc_close(ngx_ipc_t *ipc, ngx_cycle_t *cycle) {
     int i;
-    ipc_process_t   *proc;
-    ipc_msg_link_t  *cur, *cur_next;
+    ngx_ipc_process_t   *proc;
+    ngx_ipc_msg_link_t  *cur, *cur_next;
 
     for (i = 0; i < NGX_MAX_PROCESSES; i++) {
         proc = &ipc->process[i];
@@ -220,10 +211,10 @@ static ngx_int_t ngx_ipc_close(ipc_t *ipc, ngx_cycle_t *cycle) {
     return NGX_OK;
 }
 
-static ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle) {
+static ngx_int_t ipc_register_worker(ngx_ipc_t *ipc, ngx_cycle_t *cycle) {
     int                    i;
     ngx_connection_t      *c;
-    ipc_process_t         *proc;
+    ngx_ipc_process_t         *proc;
 
     for (i = 0; i< NGX_MAX_PROCESSES; i++) {
 
@@ -256,7 +247,7 @@ static ngx_int_t ipc_register_worker(ipc_t *ipc, ngx_cycle_t *cycle) {
     return NGX_OK;
 }
 
-static ngx_int_t ngx_ipc_write_buffered_msg(ngx_socket_t fd, ipc_msg_link_t *msg) {
+static ngx_int_t ngx_ipc_write_buffered_msg(ngx_socket_t fd, ngx_ipc_msg_link_t *msg) {
     ssize_t      n;
     ngx_int_t    err;
     ssize_t      unsent;
@@ -293,7 +284,7 @@ static ngx_int_t ngx_ipc_write_buffered_msg(ngx_socket_t fd, ipc_msg_link_t *msg
     return NGX_OK;
 }
 
-static ngx_int_t ngx_ipc_free_buffered_msg(ipc_msg_link_t *msg_link) {
+static ngx_int_t ngx_ipc_free_buffered_msg(ngx_ipc_msg_link_t *msg_link) {
     ngx_free(msg_link->buf.data);
     ngx_free(msg_link);
     return NGX_OK;
@@ -303,8 +294,8 @@ static void ngx_ipc_write_handler(ngx_event_t *ev) {
     ngx_connection_t *c = ev->data;
     ngx_socket_t      fd = c->fd;
 
-    ipc_process_t    *proc = (ipc_process_t *) c->data;
-    ipc_msg_link_t   *cur;
+    ngx_ipc_process_t    *proc = (ngx_ipc_process_t *) c->data;
+    ngx_ipc_msg_link_t   *cur;
 
     ngx_int_t         rc;
     uint8_t           aborted = 0;
@@ -340,7 +331,7 @@ static void ngx_ipc_write_handler(ngx_event_t *ev) {
     }
 }
 
-static ngx_int_t ngx_ipc_read(ipc_process_t *ipc_proc, ipc_readbuf_t *rbuf, ngx_log_t *log) {
+static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rbuf, ngx_log_t *log) {
     ngx_int_t       n, i;
     ngx_err_t       err;
     ngx_socket_t    s = ipc_proc->c->fd;
@@ -455,14 +446,14 @@ static void ngx_ipc_read_handler(ngx_event_t *ev) {
     //copypaste from os/unix/ngx_process_cycle.c (ngx_channel_handler)
     ngx_int_t          rc;
     ngx_connection_t  *c;
-    ipc_process_t     *ipc_proc;
+    ngx_ipc_process_t     *ipc_proc;
 
     if (ev->timedout) {
         ev->timedout = 0;
         return;
     }
     c = ev->data;
-    ipc_proc = &((ipc_t *)c->data)->process[ngx_process_slot];
+    ipc_proc = &((ngx_ipc_t *)c->data)->process[ngx_process_slot];
 
     while (1) {
 //        ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ rbuf");
@@ -484,12 +475,12 @@ static void ngx_ipc_read_handler(ngx_event_t *ev) {
 //    ngx_log_error(NGX_LOG_INFO, ev->log, 0, "\tipc: READ done");
 }
 
-static ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data) {
+static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data) {
     ngx_int_t           i;
     u_char             *c;
-    ipc_msg_link_t     *msg;
-    ipc_process_t      *proc = &ipc->process[slot];
-    ipc_writebuf_t     *wb = &proc->wbuf;
+    ngx_ipc_msg_link_t     *msg;
+    ngx_ipc_process_t      *proc = &ipc->process[slot];
+    ngx_ipc_writebuf_t     *wb = &proc->wbuf;
     size_t              msg_size = 0;
 
     ngx_str_t           empty = ngx_null_string;
@@ -509,7 +500,7 @@ static ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index
         return NGX_ERROR;
     }
 
-    if ((msg = ngx_alloc(sizeof(ipc_msg_link_t), ngx_cycle->log)) == NULL) {
+    if ((msg = ngx_alloc(sizeof(ngx_ipc_msg_link_t), ngx_cycle->log)) == NULL) {
         return NGX_ERROR;
     }
     msg->next = NULL;
@@ -573,7 +564,7 @@ static ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index
 }
 
 static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
-    shm_data_t         *d;
+    ngx_ipc_shm_data_t         *d;
     if (data) {
         zone->data = data;
         d = zone->data;
@@ -592,12 +583,12 @@ static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
     if (shdata->worker_slots) {
         shm_free(shm, shdata->worker_slots);
     }
-    shdata->worker_slots = shm_calloc(shm, sizeof(worker_slot_t) * max_workers, "worker slots");
+    shdata->worker_slots = shm_calloc(shm, sizeof(ngx_ipc_worker_slot_t) * max_workers, "worker slots");
 
     return NGX_OK;
 }
 
-int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
+ngx_int_t ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
     int i;
 
     for (i = 0; i < max_workers; i++) {
@@ -609,7 +600,7 @@ int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data)
     return 0;
 }
 
-int ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
+ngx_int_t ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
     int i;
 
     for (i = 0; i < max_workers; i++) {
@@ -670,7 +661,7 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
     }
     ngx_ipc_open(ipc, cycle, ccf->worker_processes, NULL);
 
-    received_messages = ngx_pcalloc(ngx_cycle->pool, sizeof(ipc_msg_queue_t) * ngx_cycle->modules_n);
+    received_messages = ngx_pcalloc(ngx_cycle->pool, sizeof(ngx_ipc_msg_queue_t) * ngx_cycle->modules_n);
     for (i = 0; i < ngx_cycle->modules_n; i++) {
         received_messages[i].head = NULL;
         received_messages[i].tail = NULL;
