@@ -124,13 +124,13 @@ static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str
 
     if (data->len > 0 && data->data[0] == 'h') {
         ngx_str_t r;
-        r.data = ngx_alloc(65976, ngx_cycle->log);
+        r.data = ngx_alloc(1024*1024, ngx_cycle->log);
         if (r.data == NULL) {
             ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
                           "ipc: send PONG failed dure to nomem");
         }
-        r.len = 65976;
-        for (i = 0; i < 65976; i++) {
+        r.len = 1024*1024;
+        for (i = 0; i < 1024*1024; i++) {
             r.data[i] = 'a';
         }
 
@@ -141,93 +141,6 @@ static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str
 
         ngx_free(r.data);
     }
-
-/*
-    ipc_msg_waiting_t       *alert;
-    int                        i;
-    ngx_pid_t                  sender_pid = NGX_INVALID_PID;
-    static u_char              nbuf[sizeof("response") - 1 + NGX_INT_T_LEN];
-    ngx_int_t                  conn_id;
-    ngx_pool_t                *pool;
-    ngx_chain_t               *cl, *l;
-    ngx_uint_t                 len;
-    u_char                    *p;
-
-    alert = ngx_alloc(sizeof(*alert) + name->len + data->len, ngx_cycle->log);
-
-    //find sender process id
-    for (i = 0; i < max_workers; i++) {
-        if (shdata->worker_slots[i].slot == sender_slot) {
-            sender_pid = shdata->worker_slots[i].pid;
-            break;
-        }
-    }
-
-    DBG("ngx_ipc_msg_handler sender_slot=%d, sender_pid=%ui, mypid=%ui",
-        sender_slot, sender_pid, (ngx_uint_t)ngx_getpid());
-
-    alert->sender_slot = sender_slot;
-    alert->sender_pid = sender_pid;
-
-    alert->name.data = (u_char *)&alert[1];
-    alert->name.len = name->len;
-    ngx_memcpy(alert->name.data, name->data, name->len);
-
-    alert->data.data = alert->name.data + alert->name.len;
-    alert->data.len = data->len;
-    ngx_memcpy(alert->data.data, data->data, data->len);
-
-    alert->next = NULL;
-
-    if(received_alerts.tail) {
-        received_alerts.tail->next = alert;
-    }
-    received_alerts.tail = alert;
-    if (!received_alerts.head) {
-        received_alerts.head = alert;
-    }
-
-    if (name->data[0] == 'c') { //collect:conn_id
-        conn_id = ngx_atoi(data->data, data->len);
-        if (conn_id == NGX_ERROR) {
-            ERR("got 'collect' request from fd=-1");
-        }
-
-        p = ngx_snprintf(nbuf, sizeof(nbuf), "response%d", conn_id);
-        ngx_str_t name1 = ngx_string(nbuf);
-        name1.len = p - name1.data;
-
-        pool = ngx_create_pool(1024 * 1024, cycle_log);
-
-        cl = ngx_rtmp_stat_create_stats(pool);
-        if (cl == NULL) {
-            ngx_destroy_pool(pool);
-            return;
-        }
-        len = 0;
-
-        for (l = cl; l; l = l->next) {
-            len += (l->buf->last - l->buf->pos);
-        }
-        DBG("created response with len=%ui", len);
-        ngx_str_t response;
-        response.len = len;
-        if ((response.data = ngx_pcalloc(pool, len)) == NULL) {
-            ngx_destroy_pool(pool);
-        }
-        p = response.data;
-        for (l = cl; l; l = l->next) {
-            ngx_memcpy(p, l->buf->pos, l->buf->last - l->buf->pos);
-            p += (l->buf->last - l->buf->pos);
-        }
-
-        ngx_ipc_send_msg(sender_pid, &name1, &response);
-        ngx_destroy_pool(pool);
-    } else if (name->data[0] == 'r') {
-        conn_id = ngx_atoi(name->data + 8, name->len - 8);
-
-        ngx_rtmp_stat_handle_stat(conn_id, data);
-    }*/
 }
 
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf) {

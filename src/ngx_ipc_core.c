@@ -500,13 +500,6 @@ ngx_int_t ipc_send_msg(ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_s
     ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
                   "ipc: message %d->%d md=%d len=%ui qsz=%d",
                   ngx_process_slot, slot, module_index, data->len, wb->n);
-//    if (wb->tail != NULL) {
-//        wb->tail->next = msg;
-//    }
-//    wb->tail = msg;
-//    if (wb->head == NULL) {
-//        wb->head = msg;
-//    }
 
     ipc_write_handler(proc->c->write);
 

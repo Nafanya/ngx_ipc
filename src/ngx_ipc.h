@@ -19,5 +19,6 @@ struct shm_data_s {
 };
 
 int ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data);
+int ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data);
 
 #endif //NGX_IPC_H
