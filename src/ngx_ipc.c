@@ -43,12 +43,15 @@ static void      ngx_ipc_read_handler(ngx_event_t *ev);
 static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
-#define SERIALIZE(dst, what)                         \
-    for (int _i = 0; _i < (int)sizeof(what); _i++) { \
-        int _shift = 8 * (sizeof((what)) - _i - 1);  \
-        *dst = ((what) >> _shift) & 0xFF;            \
-        dst++;                                       \
-    }                                                \
+#define SER(dst, what)                            \
+    {                                             \
+    int i;                                        \
+    for (i = 0; i < (int)sizeof(what); i++) {     \
+        int shift = 8 * (sizeof((what)) - i - 1); \
+        *dst = ((what) >> shift) & 0xFF;          \
+        dst++;                                    \
+    }                                             \
+    }
 
 
 static ngx_command_t  ngx_ipc_commands[] = {
