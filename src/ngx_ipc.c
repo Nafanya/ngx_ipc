@@ -43,17 +43,6 @@ static void      ngx_ipc_read_handler(ngx_event_t *ev);
 static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
-#define SERIALIZE(dst, what)                      \
-    {                                             \
-    int i;                                        \
-    for (i = 0; i < (int)sizeof(what); i++) {     \
-        int shift = 8 * (sizeof((what)) - i - 1); \
-        *dst = ((what) >> shift) & 0xFF;          \
-        dst++;                                    \
-    }                                             \
-    }
-
-
 static ngx_command_t  ngx_ipc_commands[] = {
     ngx_null_command
 };
@@ -331,7 +320,7 @@ static void ngx_ipc_write_handler(ngx_event_t *ev) {
 }
 
 static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rbuf, ngx_log_t *log) {
-    ngx_int_t       n, i;
+    ngx_int_t       n;
     ngx_err_t       err;
     ngx_socket_t    s = ipc_proc->c->fd;
     u_char         *c;
@@ -350,23 +339,9 @@ static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rb
             rbuf->header.bp += n;
             if (rbuf->header.bp == IPC_HEADER_LEN) {
                 c = rbuf->header.buf;
-
-                //TODO: rewrite using macros or function
-                for (i = 0, rbuf->header.slot = 0; i < (int)sizeof(rbuf->header.slot); i++) {
-                    int shift = 8 * (sizeof(rbuf->header.slot) - i - 1);
-                    rbuf->header.slot += (*c << shift);
-                    c++;
-                }
-                for (i = 0, rbuf->header.module = 0; i < (int)sizeof(rbuf->header.module); i++) {
-                    int shift = 8 * (sizeof(rbuf->header.module) - i - 1);
-                    rbuf->header.module += (*c << shift);
-                    c++;
-                }
-                for (i = 0, rbuf->header.size = 0; i < (int)sizeof(rbuf->header.size); i++) {
-                    int shift = 8 * (sizeof(rbuf->header.size) - i - 1);
-                    rbuf->header.size += (*c << shift);
-                    c++;
-                }
+                NGX_IPC_DESERIALIZE(c, rbuf->header.slot);
+                NGX_IPC_DESERIALIZE(c, rbuf->header.module);
+                NGX_IPC_DESERIALIZE(c, rbuf->header.size);
                 rbuf->header.complete = 1;
                 break;
             }
@@ -471,9 +446,9 @@ static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_i
     }
 
     c = msg->buf.data;
-    SERIALIZE(c, slot);
-    SERIALIZE(c, module_index);
-    SERIALIZE(c, data->len);
+    NGX_IPC_SERIALIZE(c, slot);
+    NGX_IPC_SERIALIZE(c, module_index);
+    NGX_IPC_SERIALIZE(c, data->len);
 
     ngx_memcpy((msg->buf.data + IPC_HEADER_LEN), data->data, data->len);
 

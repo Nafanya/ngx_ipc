@@ -13,6 +13,27 @@
 #define IPC_MAX_READ_BYTES   4096
 #define IPC_DEFAULT_RBUF_LEN 512
 
+#define NGX_IPC_SERIALIZE(dst, what)                            \
+    {                                                           \
+        int i;                                                  \
+        for (i = 0; i < (int)sizeof((what)); i++) {             \
+            int shift = 8 * (sizeof((what)) - i - 1);           \
+            *(dst) = ((what) >> shift) & 0xFF;                  \
+            (dst)++;                                            \
+        }                                                       \
+    }
+
+#define NGX_IPC_DESERIALIZE(dst, what)                          \
+    {                                                           \
+        int i;                                                  \
+        for (i = 0, (what) = 0; i < (int)sizeof((what)); i++) { \
+            int shift = 8 * (sizeof((what)) - i - 1);           \
+            (what) += (*(dst) << shift);                        \
+            (dst)++;                                            \
+        }                                                       \
+    }
+
+
 typedef void (*ngx_ipc_message_handler)(ngx_int_t from_slot, ngx_str_t *data);
 
 typedef struct ngx_ipc_msg_queue_s       ngx_ipc_msg_queue_t;
