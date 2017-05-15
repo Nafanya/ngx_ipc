@@ -76,8 +76,8 @@ ngx_module_t  ngx_ipc_module = {
 
 
 static ngx_int_t ngx_ipc_init(ngx_ipc_t *ipc) {
-    int             i;
-    ngx_ipc_process_t  *proc;
+    int                i;
+    ngx_ipc_process_t *proc;
 
     for (i = 0; i < NGX_MAX_PROCESSES; i++) {
         proc = &ipc->process[i];
@@ -96,6 +96,7 @@ static ngx_int_t ngx_ipc_init(ngx_ipc_t *ipc) {
 
 static ngx_int_t ngx_ipc_reset_readbuf(ngx_ipc_readbuf_t *b) {
 //    ngx_memzero(&b->header, sizeof(b->header));
+    //TODO: rewrite with mem_zero
     b->header.bp = 0;
     b->header.complete = 0;
     b->header.module = 0;
@@ -605,7 +606,6 @@ ngx_int_t ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
 
     for (i = 0; i < max_workers; i++) {
         ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
-//        ngx_msleep(50);
     }
 
     return 0;
