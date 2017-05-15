@@ -43,7 +43,7 @@ static void      ngx_ipc_read_handler(ngx_event_t *ev);
 static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
-#define SER(dst, what)                            \
+#define SERIALIZE(dst, what)                      \
     {                                             \
     int i;                                        \
     for (i = 0; i < (int)sizeof(what); i++) {     \
@@ -438,14 +438,13 @@ static void ngx_ipc_read_handler(ngx_event_t *ev) {
 }
 
 static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data) {
-    ngx_int_t           i;
-    u_char             *c;
-    ngx_ipc_msg_link_t     *msg;
-    ngx_ipc_process_t      *proc = &ipc->process[slot];
-    ngx_ipc_writebuf_t     *wb = &proc->wbuf;
-    size_t              msg_size = 0;
+    u_char              *c;
+    ngx_ipc_msg_link_t  *msg;
+    ngx_ipc_process_t   *proc = &ipc->process[slot];
+    ngx_ipc_writebuf_t  *wb = &proc->wbuf;
+    size_t               msg_size = 0;
+    ngx_str_t            empty = ngx_null_string;
 
-    ngx_str_t           empty = ngx_null_string;
     if (!data) {
         data = &empty;
     }
@@ -476,10 +475,7 @@ static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_i
     SERIALIZE(c, module_index);
     SERIALIZE(c, data->len);
 
-//    ngx_memcpy(msg->buf.data + IPC_HEADER_LEN, data->data, data->len);
-    for (i = 0; i < (int)data->len; i++) {
-        msg->buf.data[i + IPC_HEADER_LEN] = data->data[i];
-    }
+    ngx_memcpy((msg->buf.data + IPC_HEADER_LEN), data->data, data->len);
 
     msg->buf.len = msg_size;
 
