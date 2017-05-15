@@ -3,10 +3,10 @@
 #include <ngx_ipc.h>
 #include <ngx_ipc_shmem.h>
 
-shmem_t *shm_create(ngx_str_t *name, ngx_module_t *module, ngx_conf_t *cf, size_t shm_size,
+ngx_ipc_shmem_t *shm_create(ngx_str_t *name, ngx_module_t *module, ngx_conf_t *cf, size_t shm_size,
                     ngx_int_t (*init)(ngx_shm_zone_t *, void *), void *privdata) {
     ngx_shm_zone_t    *zone;
-    shmem_t           *shm;
+    ngx_ipc_shmem_t           *shm;
 
     shm_size = ngx_align(shm_size, ngx_pagesize);
     if (shm_size < 8 * ngx_pagesize) {
@@ -30,7 +30,7 @@ shmem_t *shm_create(ngx_str_t *name, ngx_module_t *module, ngx_conf_t *cf, size_
     return shm;
 }
 
-ngx_int_t shm_init(shmem_t *shm) {
+ngx_int_t shm_init(ngx_ipc_shmem_t *shm) {
     ngx_slab_pool_t    *shpool = ngx_ipc_shpool(shm);
 
 #if NGX_IPC_DEBUG_SHM
@@ -44,7 +44,7 @@ ngx_int_t shm_init(shmem_t *shm) {
     return NGX_OK;
 }
 
-ngx_int_t shm_reinit(shmem_t *shm) {
+ngx_int_t shm_reinit(ngx_ipc_shmem_t *shm) {
     ngx_slab_pool_t *shpool = ngx_ipc_shpool(shm);
 
     ngx_slab_init(shpool);
@@ -52,21 +52,21 @@ ngx_int_t shm_reinit(shmem_t *shm) {
     return NGX_OK;
 }
 
-void shmtx_lock(shmem_t *shm) {
+void shmtx_lock(ngx_ipc_shmem_t *shm) {
     ngx_shmtx_lock(&ngx_ipc_shpool(shm)->mutex);
 }
 
-void shmtx_unlock(shmem_t *shm) {
+void shmtx_unlock(ngx_ipc_shmem_t *shm) {
     ngx_shmtx_unlock(&ngx_ipc_shpool(shm)->mutex);
 }
 
-ngx_int_t shm_destroy(shmem_t *shm) {
+ngx_int_t shm_destroy(ngx_ipc_shmem_t *shm) {
     ngx_free(shm);
 
     return NGX_OK;
 }
 
-void *shm_alloc(shmem_t *shm, size_t size, const char *label) {
+void *shm_alloc(ngx_ipc_shmem_t *shm, size_t size, const char *label) {
     void         *p;
 #if FAKESHARD
     p = ngx_alloc(size, ngx_cycle->log);
@@ -89,7 +89,7 @@ void *shm_alloc(shmem_t *shm, size_t size, const char *label) {
     return p;
 }
 
-void *shm_calloc(shmem_t *shm, size_t size, const char *label) {
+void *shm_calloc(ngx_ipc_shmem_t *shm, size_t size, const char *label) {
     void *p = shm_alloc(shm, size, label);
     if (p != NULL) {
         ngx_memzero(p, size);
@@ -97,7 +97,7 @@ void *shm_calloc(shmem_t *shm, size_t size, const char *label) {
     return p;
 }
 
-void shm_free(shmem_t *shm, void *p) {
+void shm_free(ngx_ipc_shmem_t *shm, void *p) {
 #if FAKESHARD
     ngx_free(p);
 #else

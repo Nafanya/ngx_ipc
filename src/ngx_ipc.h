@@ -13,6 +13,8 @@
 #define IPC_MAX_READ_BYTES   4096
 #define IPC_DEFAULT_RBUF_LEN 512
 
+typedef void (*ngx_ipc_message_handler)(ngx_int_t from_slot, ngx_str_t *data);
+
 typedef struct ngx_ipc_msg_queue_s       ngx_ipc_msg_queue_t;
 typedef struct ngx_ipc_worker_slot_s     ngx_ipc_worker_slot_t;
 typedef struct ngx_ipc_shm_data_s        ngx_ipc_shm_data_t;
@@ -86,13 +88,11 @@ struct ngx_ipc_process_s {
 
 struct ngx_ipc_s {
     const char            *name;
-
     ngx_ipc_process_t      process[NGX_MAX_PROCESSES];
-
-    void                 (*handler)(ngx_int_t slot, ngx_int_t module, ngx_str_t *data);
 };
 
-ngx_int_t ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data);
-ngx_int_t ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data);
+ngx_int_t ngx_ipc_broadcast_message(ngx_module_t module, ngx_str_t *data);
+ngx_int_t ngx_ipc_send_message(ngx_int_t target_slot, ngx_module_t module, ngx_str_t *data);
+void      ngx_ipc_set_handler(ngx_module_t module, ngx_ipc_message_handler handler);
 
 #endif //NGX_IPC_H

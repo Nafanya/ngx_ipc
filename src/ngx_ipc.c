@@ -11,6 +11,8 @@
 #define DBG(fmt, args...) ngx_log_error(DEBUG_LEVEL, ngx_cycle->log, 0, "ipc: " fmt, ##args)
 #define ERR(fmt, args...) ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "ipc: " fmt, ##args)
 
+extern ngx_module_t  *ngx_modules[];
+
 static ngx_ipc_shmem_t     *shm = NULL;
 static ngx_ipc_shm_data_t  *shdata = NULL;
 static ngx_ipc_t            ipc_data;
@@ -18,6 +20,9 @@ static ngx_ipc_t           *ipc = NULL;
 static ngx_int_t            max_workers;
 static ngx_log_t           *cycle_log;
 static ngx_ipc_msg_queue_t *received_messages;
+
+static ngx_ipc_message_handler handlers[sizeof(*ngx_modules) / sizeof(ngx_module_t*)];
+
 
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf);
 static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle);
@@ -40,8 +45,7 @@ static void      ngx_ipc_write_handler(ngx_event_t *ev);
 static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rbuf, ngx_log_t *log);
 static void      ngx_ipc_read_handler(ngx_event_t *ev);
 
-static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_index, ngx_str_t *data);
-static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data);
+static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
 static ngx_command_t  ngx_ipc_commands[] = {
@@ -73,7 +77,6 @@ ngx_module_t  ngx_ipc_module = {
     ngx_ipc_exit_master,           /* exit master */
     NGX_MODULE_V1_PADDING
 };
-
 
 static ngx_int_t ngx_ipc_init(ngx_ipc_t *ipc) {
     int                i;
@@ -431,7 +434,7 @@ static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rb
 
 //                reset_readbuf(rbuf);
 
-                ipc_proc->ipc->handler(rbuf->header.slot, rbuf->header.module, &t);
+                ngx_ipc_msg_handler(rbuf->header.slot, rbuf->header.module, &t);
                 ngx_ipc_reset_readbuf(rbuf);
                 return NGX_OK;
             }
@@ -493,7 +496,7 @@ static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_i
         ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
                       "ipc: message %d->%d md=%d len=%ui",
                      ngx_process_slot, slot, module_index, data->len);
-        ipc->handler(slot, module_index, data);
+        ngx_ipc_msg_handler(slot, module_index, data);
         return NGX_OK;
     }
 
@@ -564,7 +567,7 @@ static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_i
     return NGX_OK;
 }
 
-static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
+static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data) {
     ngx_ipc_shm_data_t         *d;
     if (data) {
         zone->data = data;
@@ -589,60 +592,10 @@ static ngx_int_t initialize_shm(ngx_shm_zone_t *zone, void *data) {
     return NGX_OK;
 }
 
-ngx_int_t ngx_ipc_send_msg(ngx_int_t target_worker, ngx_int_t module, ngx_str_t *data) {
-    int i;
-
-    for (i = 0; i < max_workers; i++) {
-        if (shdata->worker_slots[i].slot == target_worker) {
-            ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
-            break;
-        }
-    }
-    return 0;
-}
-
-ngx_int_t ngx_ipc_broadcast_msg(ngx_int_t module, ngx_str_t *data) {
-    int i;
-
-    for (i = 0; i < max_workers; i++) {
-        ipc_send_msg(ipc, shdata->worker_slots[i].slot, module, data);
-    }
-
-    return 0;
-}
-
-static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
-    int i;
-
-    ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-                  "ipc: message %d<-%d module=%d len=%ui",
-                  ngx_process_slot, sender_slot, module, data->len);
-
-    if (data->len > 0 && data->data[0] == 'h') {
-        ngx_str_t r;
-        r.data = ngx_alloc(1024*1024, ngx_cycle->log);
-        if (r.data == NULL) {
-            ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-                          "ipc: send PONG failed dure to nomem");
-        }
-        r.len = 1024*1024;
-        for (i = 0; i < 1024*1024; i++) {
-            r.data[i] = 'a';
-        }
-
-//        ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0,
-//                      "ipc: send PONG from slot=%d module=%d data.len=%d", sender_slot, module, r.len);
-//        ngx_ipc_broadcast_msg(ngx_ipc_module.index, &r);
-        ngx_ipc_send_msg(sender_slot, 1, &r);
-
-        ngx_free(r.data);
-    }
-}
-
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf) {
     ngx_str_t              name = ngx_string("ngx_ipc");
 
-    shm = shm_create(&name, &ngx_ipc_module, cf, 1024*1024, initialize_shm, &ngx_ipc_module);
+    shm = shm_create(&name, &ngx_ipc_module, cf, 1024*1024, ngx_ipc_initialize_shm, &ngx_ipc_module);
 
     return NGX_OK;
 }
@@ -657,7 +610,6 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
     if (ipc == NULL) {
         ipc = &ipc_data;
         ngx_ipc_init(ipc);
-        ipc->handler = ngx_ipc_msg_handler;
     }
     ngx_ipc_open(ipc, cycle, ccf->worker_processes, NULL);
 
@@ -665,6 +617,9 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
     for (i = 0; i < ngx_cycle->modules_n; i++) {
         received_messages[i].head = NULL;
         received_messages[i].tail = NULL;
+    }
+    for (i = 0; i < sizeof(*ngx_modules) / sizeof(ngx_module_t*); i++) {
+        handlers[i] = NULL;
     }
 
     return NGX_OK;
@@ -699,4 +654,37 @@ static void ngx_ipc_exit_master(ngx_cycle_t *cycle) {
     ngx_ipc_close(ipc, cycle);
     shm_free(shm, shdata);
     shm_destroy(shm);
+}
+
+static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
+    if (handlers[module] != NULL) {
+        handlers[module](sender_slot, data);
+    }
+}
+
+ngx_int_t ngx_ipc_send_message(ngx_int_t target_slot, ngx_module_t module, ngx_str_t *data) {
+    int i;
+
+    for (i = 0; i < max_workers; i++) {
+        if (shdata->worker_slots[i].slot == target_slot) {
+            ipc_send_msg(ipc, shdata->worker_slots[i].slot, module.index, data);
+            break;
+        }
+    }
+
+    return 0;
+}
+
+ngx_int_t ngx_ipc_broadcast_message(ngx_module_t module, ngx_str_t *data) {
+    int i;
+
+    for (i = 0; i < max_workers; i++) {
+        ipc_send_msg(ipc, shdata->worker_slots[i].slot, module.index, data);
+    }
+
+    return 0;
+}
+
+void ngx_ipc_set_handler(ngx_module_t module, ngx_ipc_message_handler handler) {
+    handlers[module.index] = handler;
 }
