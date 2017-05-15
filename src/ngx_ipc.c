@@ -43,6 +43,14 @@ static void      ngx_ipc_read_handler(ngx_event_t *ev);
 static ngx_int_t ngx_ipc_initialize_shm(ngx_shm_zone_t *zone, void *data);
 
 
+#define SERIALIZE(dst, what)                         \
+    for (int _i = 0; _i < (int)sizeof(what); _i++) { \
+        int _shift = 8 * (sizeof((what)) - _i - 1);  \
+        *dst = ((what) >> _shift) & 0xFF;            \
+        dst++;                                       \
+    }                                                \
+
+
 static ngx_command_t  ngx_ipc_commands[] = {
     ngx_null_command
 };
@@ -460,24 +468,10 @@ static ngx_int_t ipc_send_msg(ngx_ipc_t *ipc, ngx_int_t slot, ngx_int_t module_i
         return NGX_ERROR;
     }
 
-    //TODO: rewrite using macros or function
-
     c = msg->buf.data;
-    for (i = 0; i < (int)sizeof(slot); i++) {
-        int shift = 8 * (sizeof(slot) - i - 1);
-        *c = (slot >> shift) & 0xFF;
-        c++;
-    }
-    for (i = 0; i < (int)sizeof(module_index); i++) {
-        int shift = 8 * (sizeof(module_index) - i - 1);
-        *c = (module_index >> shift) & 0xFF;
-        c++;
-    }
-    for (i = 0; i < (int)sizeof(data->len); i++) {
-        int shift = 8 * (sizeof(data->len) - i - 1);
-        *c = (data->len >> shift) & 0xFF;
-        c++;
-    }
+    SERIALIZE(c, slot);
+    SERIALIZE(c, module_index);
+    SERIALIZE(c, data->len);
 
 //    ngx_memcpy(msg->buf.data + IPC_HEADER_LEN, data->data, data->len);
     for (i = 0; i < (int)data->len; i++) {
