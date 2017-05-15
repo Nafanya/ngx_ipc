@@ -21,7 +21,7 @@ static ngx_int_t            max_workers;
 static ngx_log_t           *cycle_log;
 static ngx_ipc_msg_queue_t *received_messages;
 
-static ngx_ipc_message_handler handlers[sizeof(*ngx_modules) / sizeof(ngx_module_t*)];
+static ngx_ipc_message_handler *handlers;
 
 
 static ngx_int_t ngx_ipc_init_postconfig(ngx_conf_t *cf);
@@ -433,9 +433,10 @@ static ngx_int_t ngx_ipc_read(ngx_ipc_process_t *ipc_proc, ngx_ipc_readbuf_t *rb
 //                ngx_memcpy(t.data, rbuf->buf, rbuf->header.size);
 
 //                reset_readbuf(rbuf);
-
+                ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "ipc: calling handler in ngx_ipc_read");
                 ngx_ipc_msg_handler(rbuf->header.slot, rbuf->header.module, &t);
                 ngx_ipc_reset_readbuf(rbuf);
+                ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "ipc: after calling handler in ngx_ipc_read");
                 return NGX_OK;
             }
         }
@@ -618,9 +619,7 @@ static ngx_int_t ngx_ipc_init_module(ngx_cycle_t *cycle) {
         received_messages[i].head = NULL;
         received_messages[i].tail = NULL;
     }
-    for (i = 0; i < sizeof(*ngx_modules) / sizeof(ngx_module_t*); i++) {
-        handlers[i] = NULL;
-    }
+    handlers = ngx_calloc(ngx_max_module * sizeof(ngx_ipc_message_handler), ngx_cycle->log);
 
     return NGX_OK;
 }
@@ -657,6 +656,7 @@ static void ngx_ipc_exit_master(ngx_cycle_t *cycle) {
 }
 
 static void ngx_ipc_msg_handler(ngx_int_t sender_slot, ngx_int_t module, ngx_str_t *data) {
+    ngx_log_error(NGX_LOG_INFO, ngx_cycle->log, 0, "ipc: calling ipc msg handler");
     if (handlers[module] != NULL) {
         handlers[module](sender_slot, data);
     }
